@@ -47,6 +47,33 @@ class GitTest {
     assertEquals(new String(body), new String(out));
   }
 
+  @Test
+  void lsTreeNameOnlyListsEntriesInOrder(@TempDir Path root) throws Exception {
+    // Build a real tree with git, then check our reader against `git ls-tree --name-only`.
+    run(root, "git", "init", "-q");
+    Files.writeString(root.resolve("root.txt"), "a");
+    Files.createDirectories(root.resolve("beta"));
+    Files.writeString(root.resolve("beta/x"), "b");
+    Files.createDirectories(root.resolve("alpha"));
+    Files.writeString(root.resolve("alpha/y"), "c");
+    run(root, "git", "add", "-A");
+    run(root, "git", "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "t");
+    String treeSha = run(root, "git", "rev-parse", "HEAD^{tree}").trim();
+
+    String expected = run(root, "git", "ls-tree", "--name-only", treeSha);
+    String actual = capture(() -> Git.lsTreeNameOnly(root, treeSha));
+    assertEquals(expected, actual);
+  }
+
+  private static String run(Path dir, String... cmd) throws Exception {
+    Process p = new ProcessBuilder(cmd).directory(dir.toFile()).redirectErrorStream(true).start();
+    String out = new String(p.getInputStream().readAllBytes());
+    if (p.waitFor() != 0) {
+      throw new IllegalStateException(String.join(" ", cmd) + " failed:\n" + out);
+    }
+    return out;
+  }
+
   private interface Action {
     void run() throws IOException;
   }

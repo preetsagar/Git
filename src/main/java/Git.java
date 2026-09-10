@@ -42,6 +42,21 @@ public final class Git {
     return sha;
   }
 
+  /** {@code ls-tree --name-only <sha>}: print each tree entry name on its own line, in stored order. */
+  public static void lsTreeNameOnly(Path root, String sha) throws IOException {
+    byte[] raw = readObject(root, sha);
+    int pos = indexOf(raw, (byte) 0) + 1; // skip "tree <size>\0"
+    StringBuilder out = new StringBuilder();
+    while (pos < raw.length) {
+      pos = indexOf(raw, pos, (byte) ' ') + 1; // skip "<mode> "
+      int nameEnd = indexOf(raw, pos, (byte) 0);
+      out.append(new String(raw, pos, nameEnd - pos)).append('\n');
+      pos = nameEnd + 1 + 20; // skip name\0 + 20-byte sha
+    }
+    System.out.print(out);
+    System.out.flush();
+  }
+
   // --- object store ---------------------------------------------------------
 
   /** Inflate the object file at {@code .git/objects/xx/yyy...} into its raw bytes (header + body). */
@@ -89,7 +104,11 @@ public final class Git {
   }
 
   static int indexOf(byte[] bytes, byte target) {
-    for (int i = 0; i < bytes.length; i++) {
+    return indexOf(bytes, 0, target);
+  }
+
+  static int indexOf(byte[] bytes, int from, byte target) {
+    for (int i = from; i < bytes.length; i++) {
       if (bytes[i] == target) {
         return i;
       }
