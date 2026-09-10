@@ -86,6 +86,26 @@ class GitTest {
     assertEquals(expected, ours);
   }
 
+  @Test
+  void commitTreeIsReadableByGit(@TempDir Path root) throws Exception {
+    run(root, "git", "init", "-q");
+    Files.writeString(root.resolve("a.txt"), "hi\n");
+    run(root, "git", "add", "-A");
+    run(root, "git", "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "first");
+    String parent = run(root, "git", "rev-parse", "HEAD").trim();
+    String tree = run(root, "git", "rev-parse", "HEAD^{tree}").trim();
+
+    String sha =
+        capture(() -> Git.commitTree(root, tree, java.util.List.of(parent), "my message")).trim();
+
+    assertEquals(tree, run(root, "git", "rev-parse", sha + "^{tree}").trim());
+    assertEquals(parent, run(root, "git", "rev-parse", sha + "^").trim());
+    assertEquals("my message", run(root, "git", "log", "-1", "--format=%B", sha).strip());
+    // commit body after the header blank line must be exactly "<message>\n" (what go-git checks)
+    String raw = capture(() -> Git.catFilePretty(root, sha));
+    assertTrue(raw.endsWith("\nmy message\n"), raw);
+  }
+
   private static String run(Path dir, String... cmd) throws Exception {
     Process p = new ProcessBuilder(cmd).directory(dir.toFile()).redirectErrorStream(true).start();
     String out = new String(p.getInputStream().readAllBytes());

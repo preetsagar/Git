@@ -20,6 +20,19 @@ public class Main {
       }
       case "ls-tree" -> Git.lsTreeNameOnly(cwd, args[args.length - 1]); // ls-tree --name-only <sha>
       case "write-tree" -> Git.writeTree(cwd);
+      case "commit-tree" -> {
+        String tree = args[1];
+        var parents = new java.util.ArrayList<String>();
+        String message = "";
+        for (int i = 2; i < args.length; i++) {
+          if (args[i].equals("-p")) {
+            parents.add(args[++i]);
+          } else if (args[i].equals("-m")) {
+            message = args[++i];
+          }
+        }
+        Git.commitTree(cwd, tree, parents, message);
+      }
       default -> {
         System.err.println("Unknown command: " + command);
         System.exit(1);

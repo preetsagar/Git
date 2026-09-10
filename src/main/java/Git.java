@@ -3,6 +3,7 @@ import java.io.IOException;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.security.MessageDigest;
+import java.time.Instant;
 import java.security.NoSuchAlgorithmException;
 import java.util.ArrayList;
 import java.util.Comparator;
@@ -96,6 +97,24 @@ public final class Git {
       body.writeBytes(e.line());
     }
     return storeObject(root, "tree", body.toByteArray());
+  }
+
+  /** {@code commit-tree <tree> [-p <parent>]... -m <message>}: store a commit, print its SHA. */
+  public static String commitTree(Path root, String treeSha, List<String> parents, String message)
+      throws IOException {
+    String who = "CodeCrafters <codecrafters@example.com> " + Instant.now().getEpochSecond() + " +0000";
+    StringBuilder b = new StringBuilder();
+    b.append("tree ").append(treeSha).append('\n');
+    for (String p : parents) {
+      b.append("parent ").append(p).append('\n');
+    }
+    b.append("author ").append(who).append('\n');
+    b.append("committer ").append(who).append('\n');
+    b.append('\n').append(message).append('\n');
+
+    String sha = storeObject(root, "commit", b.toString().getBytes());
+    System.out.println(sha);
+    return sha;
   }
 
   // --- object store ---------------------------------------------------------
