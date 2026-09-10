@@ -9,10 +9,15 @@ public class Main {
       System.exit(1);
     }
 
-    final Path cwd = Path.of(".");
-    final String command = args[0];
+    Path cwd = Path.of(".");
+    String command = args[0];
     switch (command) {
       case "init" -> Git.init(cwd);
+      case "cat-file" -> Git.catFilePretty(cwd, args[2]); // cat-file -p <sha>
+      case "hash-object" -> {
+        boolean write = args[1].equals("-w");
+        Git.hashObject(cwd, Path.of(args[write ? 2 : 1]), write);
+      }
       default -> {
         System.err.println("Unknown command: " + command);
         System.exit(1);
