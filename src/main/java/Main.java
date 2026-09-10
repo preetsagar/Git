@@ -33,6 +33,7 @@ public class Main {
         }
         Git.commitTree(cwd, tree, parents, message);
       }
+      case "clone" -> Clone.run(args[1], args[2]); // clone <url> <dir>
       default -> {
         System.err.println("Unknown command: " + command);
         System.exit(1);

@@ -106,11 +106,72 @@ class GitTest {
     assertTrue(raw.endsWith("\nmy message\n"), raw);
   }
 
+  @Test
+  void unpackExplodesAPackWithRefDeltas(@TempDir Path src, @TempDir Path dst) throws Exception {
+    // Source repo with a big file changed slightly across two commits -> git will delta them.
+    run(src, "git", "init", "-q");
+    StringBuilder big = new StringBuilder();
+    for (int i = 0; i < 2000; i++) {
+      big.append("line ").append(i).append('\n');
+    }
+    Files.writeString(src.resolve("big.txt"), big);
+    Files.createDirectories(src.resolve("d"));
+    Files.writeString(src.resolve("d/small.txt"), "hello\n");
+    run(src, "git", "add", "-A");
+    run(src, "git", "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "one");
+    Files.writeString(src.resolve("big.txt"), big.append("one more line\n"));
+    run(src, "git", "add", "-A");
+    run(src, "git", "-c", "user.email=t@t", "-c", "user.name=t", "commit", "-qm", "two");
+
+    // Build a REF_DELTA pack (mirrors what a server without ofs-delta capability sends).
+    String objects = run(src, "git", "rev-list", "--all", "--objects");
+    Path shaList = src.resolve("shas.txt");
+    StringBuilder shas = new StringBuilder();
+    for (String line : objects.strip().split("\n")) {
+      shas.append(line.split(" ")[0]).append('\n');
+    }
+    Files.writeString(shaList, shas);
+    byte[] pack =
+        runBytes(
+            src, shaList, "git", "-c", "pack.useDeltaBaseOffset=false", "pack-objects", "--stdout");
+
+    Git.init(dst);
+    Clone.unpack(pack, dst);
+
+    String headTree = run(src, "git", "rev-parse", "HEAD^{tree}").trim();
+    // Every object from the source must now be a valid loose object in dst.
+    for (String line : objects.strip().split("\n")) {
+      String sha = line.split(" ")[0];
+      assertEquals(
+          run(src, "git", "cat-file", "-t", sha).trim(),
+          run(dst, "git", "cat-file", "-t", sha).trim(),
+          "type mismatch for " + sha);
+    }
+    assertEquals(
+        run(src, "git", "cat-file", "-p", headTree),
+        run(dst, "git", "cat-file", "-p", headTree));
+  }
+
   private static String run(Path dir, String... cmd) throws Exception {
     Process p = new ProcessBuilder(cmd).directory(dir.toFile()).redirectErrorStream(true).start();
     String out = new String(p.getInputStream().readAllBytes());
     if (p.waitFor() != 0) {
       throw new IllegalStateException(String.join(" ", cmd) + " failed:\n" + out);
+    }
+    return out;
+  }
+
+  /** Run a command with {@code stdinFile} piped to stdin; return raw stdout bytes. */
+  private static byte[] runBytes(Path dir, Path stdinFile, String... cmd) throws Exception {
+    Process p =
+        new ProcessBuilder(cmd)
+            .directory(dir.toFile())
+            .redirectInput(stdinFile.toFile())
+            .redirectError(ProcessBuilder.Redirect.INHERIT)
+            .start();
+    byte[] out = p.getInputStream().readAllBytes();
+    if (p.waitFor() != 0) {
+      throw new IllegalStateException(String.join(" ", cmd) + " exited nonzero");
     }
     return out;
   }
