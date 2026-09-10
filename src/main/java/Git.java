@@ -1,10 +1,13 @@
 import java.io.ByteArrayOutputStream;
 import java.io.IOException;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.security.MessageDigest;
+import java.security.NoSuchAlgorithmException;
+import java.util.ArrayList;
+import java.util.Comparator;
 import java.util.HexFormat;
+import java.util.List;
 import java.util.zip.Deflater;
 import java.util.zip.DeflaterOutputStream;
 import java.util.zip.InflaterInputStream;
@@ -25,7 +28,7 @@ public final class Git {
   /** {@code cat-file -p <sha>}: write the raw body of the object to stdout. */
   public static void catFilePretty(Path root, String sha) throws IOException {
     byte[] raw = readObject(root, sha);
-    int nul = indexOf(raw, (byte) 0);
+    int nul = indexOf(raw, 0, (byte) 0);
     System.out.write(raw, nul + 1, raw.length - nul - 1);
     System.out.flush();
   }
@@ -33,11 +36,7 @@ public final class Git {
   /** {@code hash-object [-w] <file>}: print the blob SHA, optionally storing the object. */
   public static String hashObject(Path root, Path file, boolean write) throws IOException {
     byte[] content = Files.readAllBytes(file);
-    byte[] object = concat(("blob " + content.length + "\0").getBytes(), content);
-    String sha = sha1Hex(object);
-    if (write) {
-      writeObject(root, sha, object);
-    }
+    String sha = write ? storeObject(root, "blob", content) : sha1Hex(wrap("blob", content));
     System.out.println(sha);
     return sha;
   }
@@ -45,7 +44,7 @@ public final class Git {
   /** {@code ls-tree --name-only <sha>}: print each tree entry name on its own line, in stored order. */
   public static void lsTreeNameOnly(Path root, String sha) throws IOException {
     byte[] raw = readObject(root, sha);
-    int pos = indexOf(raw, (byte) 0) + 1; // skip "tree <size>\0"
+    int pos = indexOf(raw, 0, (byte) 0) + 1; // skip "tree <size>\0"
     StringBuilder out = new StringBuilder();
     while (pos < raw.length) {
       pos = indexOf(raw, pos, (byte) ' ') + 1; // skip "<mode> "
@@ -55,6 +54,48 @@ public final class Git {
     }
     System.out.print(out);
     System.out.flush();
+  }
+
+  /** {@code write-tree}: recursively store the working tree, print the root tree SHA. */
+  public static String writeTree(Path root) throws IOException {
+    String sha = writeTreeRecursive(root, root);
+    System.out.println(sha);
+    return sha;
+  }
+
+  /** Store a tree object for {@code dir}; returns its 40-char hex SHA. */
+  private static String writeTreeRecursive(Path root, Path dir) throws IOException {
+    record Entry(String name, byte[] line) {}
+    List<Entry> entries = new ArrayList<>();
+
+    try (var stream = Files.list(dir)) {
+      for (Path child : (Iterable<Path>) stream::iterator) {
+        String name = child.getFileName().toString();
+        if (name.equals(".git")) {
+          continue;
+        }
+        String mode;
+        String childSha;
+        if (Files.isDirectory(child)) {
+          mode = "40000";
+          childSha = writeTreeRecursive(root, child);
+        } else {
+          mode = Files.isExecutable(child) ? "100755" : "100644";
+          childSha = storeObject(root, "blob", Files.readAllBytes(child));
+        }
+        // sort key: git compares directory names as if they ended in '/'
+        String sortName = mode.equals("40000") ? name + "/" : name;
+        byte[] line = concat((mode + " " + name + "\0").getBytes(), HexFormat.of().parseHex(childSha));
+        entries.add(new Entry(sortName, line));
+      }
+    }
+
+    entries.sort(Comparator.comparing(Entry::name));
+    ByteArrayOutputStream body = new ByteArrayOutputStream();
+    for (Entry e : entries) {
+      body.writeBytes(e.line());
+    }
+    return storeObject(root, "tree", body.toByteArray());
   }
 
   // --- object store ---------------------------------------------------------
@@ -67,30 +108,33 @@ public final class Git {
     }
   }
 
-  /** Zlib-compress {@code object} and store it at {@code .git/objects/xx/yyy...}. */
-  static void writeObject(Path root, String sha, byte[] object) throws IOException {
+  /** Wrap {@code body} with a {@code "<type> <len>\0"} header, hash, zlib-store it; returns hex SHA. */
+  static String storeObject(Path root, String type, byte[] body) throws IOException {
+    byte[] object = wrap(type, body);
+    String sha = sha1Hex(object);
     Path dir = root.resolve(".git/objects").resolve(sha.substring(0, 2));
     Files.createDirectories(dir);
     Path path = dir.resolve(sha.substring(2));
-    if (Files.exists(path)) {
-      return;
+    if (!Files.exists(path)) {
+      ByteArrayOutputStream buf = new ByteArrayOutputStream();
+      try (DeflaterOutputStream out =
+          new DeflaterOutputStream(buf, new Deflater(Deflater.BEST_SPEED))) {
+        out.write(object);
+      }
+      Files.write(path, buf.toByteArray());
     }
-    ByteArrayOutputStream buf = new ByteArrayOutputStream();
-    try (DeflaterOutputStream out = new DeflaterOutputStream(buf, new Deflater(Deflater.BEST_SPEED))) {
-      out.write(object);
-    }
-    Files.write(path, buf.toByteArray());
+    return sha;
+  }
+
+  static byte[] wrap(String type, byte[] body) {
+    return concat((type + " " + body.length + "\0").getBytes(), body);
   }
 
   // --- helpers -------------------------------------------------------------
 
   static String sha1Hex(byte[] bytes) {
-    return HexFormat.of().formatHex(sha1(bytes));
-  }
-
-  static byte[] sha1(byte[] bytes) {
     try {
-      return MessageDigest.getInstance("SHA-1").digest(bytes);
+      return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-1").digest(bytes));
     } catch (NoSuchAlgorithmException e) {
       throw new IllegalStateException(e);
     }
@@ -101,10 +145,6 @@ public final class Git {
     System.arraycopy(a, 0, r, 0, a.length);
     System.arraycopy(b, 0, r, a.length, b.length);
     return r;
-  }
-
-  static int indexOf(byte[] bytes, byte target) {
-    return indexOf(bytes, 0, target);
   }
 
   static int indexOf(byte[] bytes, int from, byte target) {

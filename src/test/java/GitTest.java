@@ -65,6 +65,27 @@ class GitTest {
     assertEquals(expected, actual);
   }
 
+  @Test
+  void writeTreeMatchesGit(@TempDir Path root) throws Exception {
+    // Same layout the tester builds: a root file, dir1 with two files, dir2 with one.
+    Files.writeString(root.resolve("root.txt"), "a\n");
+    Files.createDirectories(root.resolve("zed"));
+    Files.writeString(root.resolve("zed/f2"), "b\n");
+    Files.writeString(root.resolve("zed/f3"), "cc\n");
+    Files.createDirectories(root.resolve("mid"));
+    Files.writeString(root.resolve("mid/f4"), "dddd\n");
+    // a name that collides on the dir-vs-file sort boundary
+    Files.writeString(root.resolve("mid.txt"), "e\n");
+
+    Git.init(root);
+    String ours = capture(() -> Git.writeTree(root)).trim();
+
+    run(root, "git", "init", "-q");
+    run(root, "git", "add", "-A");
+    String expected = run(root, "git", "write-tree").trim();
+    assertEquals(expected, ours);
+  }
+
   private static String run(Path dir, String... cmd) throws Exception {
     Process p = new ProcessBuilder(cmd).directory(dir.toFile()).redirectErrorStream(true).start();
     String out = new String(p.getInputStream().readAllBytes());

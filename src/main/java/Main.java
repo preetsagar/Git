@@ -19,6 +19,7 @@ public class Main {
         Git.hashObject(cwd, Path.of(args[write ? 2 : 1]), write);
       }
       case "ls-tree" -> Git.lsTreeNameOnly(cwd, args[args.length - 1]); // ls-tree --name-only <sha>
+      case "write-tree" -> Git.writeTree(cwd);
       default -> {
         System.err.println("Unknown command: " + command);
         System.exit(1);
